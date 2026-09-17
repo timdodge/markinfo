@@ -1,0 +1,10 @@
+mdlUnzip = 44, 44, 536, 492, C
+frmImport = 0, 0, 0, 0, C, 220, 220, 779, 668, C
+frmNewSess = 0, 0, 0, 0, C, 0, 0, 559, 448, C
+mdlMain = 0, 0, 0, 0, C
+Player = 0, 0, 0, 0, C
+Squad = 132, 132, 735, 488, C
+DBManager = 22, 22, 514, 470, C
+frmPlayer = 0, 0, 0, 0, C, 22, 22, 581, 470, C
+mdlShoFile = 66, 66, 558, 514, C
+frmMain = 110, 110, 713, 466, C, 198, 198, 757, 646, C

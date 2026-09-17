@@ -1,0 +1,3 @@
+# MarkInfo runs with the Python standard library (tkinter + sqlite3).
+# Optional MySQL backend:
+pymysql>=1.0.0

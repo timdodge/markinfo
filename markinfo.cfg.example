@@ -11,3 +11,8 @@ port = 3306
 user = markinfo
 password =
 database = markinfo
+
+[ui]
+# Size multiplier for high-DPI / scaled displays.
+# 1.0 = 100%, 1.5 = 150%, 2.0 = 200%. Allowed range is 1.0 to 2.5.
+scale = 1.0

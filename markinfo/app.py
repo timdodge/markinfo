@@ -14,11 +14,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
     cfg = config_from_args(args)
     try:
-        db = connect(cfg)
+        db = connect(cfg.database)
     except DatabaseError as exc:
         print(f"markinfo: {exc}", file=sys.stderr)
         return 1
-    MarkInfoApp(db).run()
+    MarkInfoApp(db, cfg).run()
     return 0
 
 

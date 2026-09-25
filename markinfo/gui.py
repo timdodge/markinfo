@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import tkinter as tk
+import tkinter.font as tkfont
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Optional
 
 from markinfo import __version__
+from markinfo.config import (
+    AppConfig,
+    UI_SCALE_STEPS,
+    normalize_ui_scale,
+    save_config,
+    step_ui_scale,
+)
 from markinfo.database import DBManager
 from markinfo.models import (
     AGE_MAX,
@@ -34,6 +42,31 @@ SEARCH_HEADINGS = ("League", "Team") + SQUAD_HEADINGS
 NO_LEAGUES = "NO LEAGUES"
 NO_TEAMS = "NO TEAMS"
 ALL = "(All)"
+BASE_MIN_WIDTH = 760
+BASE_MIN_HEIGHT = 560
+TREE_COL_WIDTHS = {
+    "league": 110,
+    "team": 110,
+    "name": 140,
+    "age": 50,
+    "level": 50,
+    "cat": 50,
+    "pos": 60,
+    "type": 60,
+    "sess": 70,
+    "notes": 70,
+}
+NAMED_FONTS = (
+    "TkDefaultFont",
+    "TkTextFont",
+    "TkFixedFont",
+    "TkMenuFont",
+    "TkHeadingFont",
+    "TkCaptionFont",
+    "TkSmallCaptionFont",
+    "TkIconFont",
+    "TkTooltipFont",
+)
 
 
 def set_window_icon(win: tk.Misc) -> None:
@@ -340,21 +373,32 @@ class NewSeasonDialog(tk.Toplevel):
 
 
 class MarkInfoApp:
-    def __init__(self, db: DBManager) -> None:
+    def __init__(self, db: DBManager, config: Optional[AppConfig] = None) -> None:
         self.db = db
+        self.config = config or AppConfig()
         self.squad: list[Player] = []
         self.search_results: list[Player] = []
         self._tree_sort: dict[int, dict] = {}
+        self._trees: list[ttk.Treeview] = []
+        self._ui_scale = self.config.ui_scale
         self.root = tk.Tk()
         self.root.title("MarkInfo 3.0")
-        self.root.minsize(760, 560)
+        self.root.minsize(BASE_MIN_WIDTH, BASE_MIN_HEIGHT)
         set_window_icon(self.root)
         try:
             ttk.Style().theme_use("clam")
         except tk.TclError:
             pass
+        self._ui_scale_var = tk.IntVar(value=int(round(self._ui_scale * 100)))
+        self._capture_scale_baselines()
+        self._apply_ui_scale()
         self._build_menu()
         self._build_body()
+        if abs(self._ui_scale - 1.0) > 1e-9:
+            self.root.geometry(
+                f"{int(round(BASE_MIN_WIDTH * self._ui_scale))}x"
+                f"{int(round(BASE_MIN_HEIGHT * self._ui_scale))}"
+            )
         self.session_var.set(self.db.session)
         self.refresh_leagues()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -362,6 +406,13 @@ class MarkInfoApp:
         self.root.bind("<Control-i>", lambda _e: self._import_shomatch())
         self.root.bind("<Control-l>", lambda _e: self._add_league())
         self.root.bind("<Control-t>", lambda _e: self._add_team())
+        self.root.bind("<Control-plus>", lambda _e: self._nudge_ui_scale(1))
+        self.root.bind("<Control-equal>", lambda _e: self._nudge_ui_scale(1))
+        self.root.bind("<Control-KP_Add>", lambda _e: self._nudge_ui_scale(1))
+        self.root.bind("<Control-minus>", lambda _e: self._nudge_ui_scale(-1))
+        self.root.bind("<Control-KP_Subtract>", lambda _e: self._nudge_ui_scale(-1))
+        self.root.bind("<Control-0>", lambda _e: self._set_ui_scale(1.0))
+        self.root.bind("<Control-KP_0>", lambda _e: self._set_ui_scale(1.0))
 
     def run(self) -> None:
         self.root.mainloop()
@@ -391,6 +442,35 @@ class MarkInfoApp:
         maint.add_command(label="Delete Team", command=self._del_team)
         maint.add_command(label="Rename Team", command=self._rename_team)
         menubar.add_cascade(label="Maintenance", menu=maint)
+
+        view = tk.Menu(menubar, tearoff=0)
+        size_menu = tk.Menu(view, tearoff=0)
+        for step in UI_SCALE_STEPS:
+            percent = int(round(step * 100))
+            size_menu.add_radiobutton(
+                label=f"{percent}%",
+                value=percent,
+                variable=self._ui_scale_var,
+                command=self._on_ui_scale_menu,
+            )
+        view.add_cascade(label="UI Size", menu=size_menu)
+        view.add_separator()
+        view.add_command(
+            label="Increase UI Size",
+            command=lambda: self._nudge_ui_scale(1),
+            accelerator="Ctrl++",
+        )
+        view.add_command(
+            label="Decrease UI Size",
+            command=lambda: self._nudge_ui_scale(-1),
+            accelerator="Ctrl+-",
+        )
+        view.add_command(
+            label="Reset UI Size",
+            command=lambda: self._set_ui_scale(1.0),
+            accelerator="Ctrl+0",
+        )
+        menubar.add_cascade(label="View", menu=view)
 
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="About", command=self._about)
@@ -528,27 +608,21 @@ class MarkInfoApp:
         tree.configure(yscrollcommand=yscroll.set)
         tree.pack(side="left", fill="both", expand=True)
         yscroll.pack(side="right", fill="y")
-        widths = {
-            "league": 110,
-            "team": 110,
-            "name": 140,
-            "age": 50,
-            "level": 50,
-            "cat": 50,
-            "pos": 60,
-            "type": 60,
-            "sess": 70,
-            "notes": 70,
-        }
+        factor = self._ui_scale
         for col, heading in zip(columns, headings):
             tree.heading(col, text=heading, command=lambda c=col: self._sort_tree(tree, c))
-            tree.column(col, width=widths.get(col, 80), anchor="center" if col != "name" else "w")
+            tree.column(
+                col,
+                width=int(TREE_COL_WIDTHS.get(col, 80) * factor),
+                anchor="center" if col != "name" else "w",
+            )
         tree.tag_configure("old", foreground="#666666")
         self._tree_sort[id(tree)] = {
             "col": None,
             "reverse": False,
             "headings": dict(zip(columns, headings)),
         }
+        self._trees.append(tree)
         return tree
 
     def _sort_tree(self, tree: ttk.Treeview, col: str) -> None:
@@ -579,6 +653,95 @@ class MarkInfoApp:
             if name == col:
                 suffix = " ↓" if reverse else " ↑"
             tree.heading(name, text=heading + suffix)
+
+    # -- UI scale -----------------------------------------------------------
+
+    def _capture_scale_baselines(self) -> None:
+        self._base_fonts: dict[str, dict] = {}
+        for name in NAMED_FONTS:
+            try:
+                named = tkfont.nametofont(name)
+            except tk.TclError:
+                continue
+            size = int(named.cget("size") or 0)
+            if size == 0:
+                size = int(named.actual("size") or 10)
+            self._base_fonts[name] = {
+                "family": named.cget("family"),
+                "size": size,
+                "weight": named.cget("weight"),
+                "slant": named.cget("slant"),
+            }
+
+    def _on_ui_scale_menu(self) -> None:
+        self._set_ui_scale(self._ui_scale_var.get() / 100.0)
+
+    def _nudge_ui_scale(self, delta: int) -> None:
+        self._set_ui_scale(step_ui_scale(self._ui_scale, delta))
+
+    def _set_ui_scale(self, factor: float) -> None:
+        factor = normalize_ui_scale(factor)
+        if abs(factor - self._ui_scale) < 1e-9:
+            self._ui_scale_var.set(int(round(factor * 100)))
+            return
+        self._ui_scale = factor
+        self.config.ui_scale = factor
+        self._ui_scale_var.set(int(round(factor * 100)))
+        self._apply_ui_scale()
+        try:
+            save_config(self.config)
+        except OSError as exc:
+            messagebox.showwarning("UI size", f"Could not save the UI size setting:\n{exc}")
+        if hasattr(self, "status"):
+            self.status.set(f"UI size set to {int(round(factor * 100))}%")
+
+    def _apply_ui_scale(self) -> None:
+        factor = self._ui_scale
+        for name, info in self._base_fonts.items():
+            try:
+                named = tkfont.nametofont(name)
+            except tk.TclError:
+                continue
+            size = int(info["size"])
+            new_size = max(1, int(round(abs(size) * factor)))
+            if size < 0:
+                new_size = -new_size
+            named.configure(size=new_size)
+        style = ttk.Style(self.root)
+        default_font = tkfont.nametofont("TkDefaultFont")
+        heading_font = tkfont.nametofont("TkHeadingFont")
+        line = int(default_font.metrics("linespace") or 16)
+        rowheight = max(line + 8, int(round(22 * factor)))
+        arrow = max(10, int(round(12 * factor)))
+        pad_x = max(4, int(round(6 * factor)))
+        pad_y = max(2, int(round(4 * factor)))
+        style.configure(".", font=default_font)
+        style.configure("Treeview", font=default_font, rowheight=rowheight)
+        style.configure("Treeview.Heading", font=heading_font)
+        style.configure("TButton", padding=(pad_x, pad_y))
+        style.configure("TNotebook.Tab", padding=(pad_x, pad_y))
+        try:
+            style.configure("TSpinbox", arrowsize=arrow)
+            style.configure("TCombobox", arrowsize=arrow)
+            style.configure("Vertical.TScrollbar", arrowsize=arrow, width=arrow)
+            style.configure("Horizontal.TScrollbar", arrowsize=arrow, width=arrow)
+        except tk.TclError:
+            pass
+        min_w = int(round(BASE_MIN_WIDTH * factor))
+        min_h = int(round(BASE_MIN_HEIGHT * factor))
+        self.root.minsize(min_w, min_h)
+        self._scale_tree_columns()
+        if self.root.winfo_ismapped():
+            self.root.update_idletasks()
+            width = max(self.root.winfo_width(), min_w)
+            height = max(self.root.winfo_height(), min_h)
+            self.root.geometry(f"{width}x{height}")
+
+    def _scale_tree_columns(self) -> None:
+        factor = self._ui_scale
+        for tree in self._trees:
+            for col in tree["columns"]:
+                tree.column(col, width=int(TREE_COL_WIDTHS.get(col, 80) * factor))
 
     # -- data refresh -------------------------------------------------------
 

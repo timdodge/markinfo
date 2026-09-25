@@ -344,6 +344,7 @@ class MarkInfoApp:
         self.db = db
         self.squad: list[Player] = []
         self.search_results: list[Player] = []
+        self._tree_sort: dict[int, dict] = {}
         self.root = tk.Tk()
         self.root.title("MarkInfo 3.0")
         self.root.minsize(760, 560)
@@ -543,17 +544,41 @@ class MarkInfoApp:
             tree.heading(col, text=heading, command=lambda c=col: self._sort_tree(tree, c))
             tree.column(col, width=widths.get(col, 80), anchor="center" if col != "name" else "w")
         tree.tag_configure("old", foreground="#666666")
+        self._tree_sort[id(tree)] = {
+            "col": None,
+            "reverse": False,
+            "headings": dict(zip(columns, headings)),
+        }
         return tree
 
     def _sort_tree(self, tree: ttk.Treeview, col: str) -> None:
+        state = self._tree_sort[id(tree)]
+        if state["col"] == col:
+            state["reverse"] = not state["reverse"]
+        else:
+            state["col"] = col
+            state["reverse"] = False
+        self._apply_sort(tree)
+
+    def _apply_sort(self, tree: ttk.Treeview) -> None:
+        state = self._tree_sort.get(id(tree))
+        if not state or not state["col"]:
+            return
+        col = state["col"]
+        reverse = state["reverse"]
         rows = [(tree.set(item, col), item) for item in tree.get_children("")]
         numeric = all(not value or _is_int(value) for value, _item in rows)
         if numeric:
-            rows.sort(key=lambda pair: int(pair[0] or 0))
+            rows.sort(key=lambda pair: int(pair[0] or 0), reverse=reverse)
         else:
-            rows.sort(key=lambda pair: pair[0])
+            rows.sort(key=lambda pair: str(pair[0]), reverse=reverse)
         for index, (_value, item) in enumerate(rows):
             tree.move(item, "", index)
+        for name, heading in state["headings"].items():
+            suffix = ""
+            if name == col:
+                suffix = " ↓" if reverse else " ↑"
+            tree.heading(name, text=heading + suffix)
 
     # -- data refresh -------------------------------------------------------
 
@@ -635,15 +660,20 @@ class MarkInfoApp:
                 ),
                 tags=tags,
             )
+        self._apply_sort(self.squad_tree)
         self.status.set(f"{len(self.squad)} player(s) in {team}")
 
     def _selected_squad_player(self) -> Optional[Player]:
         selection = self.squad_tree.selection()
         if not selection:
             return None
-        index = self.squad_tree.index(selection[0])
-        if 0 <= index < len(self.squad):
-            return self.squad[index]
+        values = self.squad_tree.item(selection[0], "values")
+        if not values:
+            return None
+        name = values[0]
+        for player in self.squad:
+            if player.name == name:
+                return player
         return None
 
     def _refresh_search_filters(self) -> None:
@@ -724,15 +754,20 @@ class MarkInfoApp:
                 ),
                 tags=tags,
             )
+        self._apply_sort(self.search_tree)
         self.status.set(f"{len(self.search_results)} player(s) matched")
 
     def _selected_search_player(self) -> Optional[Player]:
         selection = self.search_tree.selection()
         if not selection:
             return None
-        index = self.search_tree.index(selection[0])
-        if 0 <= index < len(self.search_results):
-            return self.search_results[index]
+        values = self.search_tree.item(selection[0], "values")
+        if not values:
+            return None
+        league, team, name = values[0], values[1], values[2]
+        for player in self.search_results:
+            if player.league == league and player.team == team and player.name == name:
+                return player
         return None
 
     # -- player actions -----------------------------------------------------

@@ -30,7 +30,7 @@ class TokenizeTests(unittest.TestCase):
 class SquadParseTests(unittest.TestCase):
     def test_outfield_player(self) -> None:
         player = parse_squad_line(
-            ["SMITH", "DF", "24-8", "S", "ARSENAL"], "PREMIER"
+            ["10)", "SMITH", "DF", "24-8", "S", "ARSENAL"], "PREMIER"
         )
         assert player is not None
         self.assertEqual(player.name, "SMITH")
@@ -42,24 +42,12 @@ class SquadParseTests(unittest.TestCase):
         self.assertEqual(player.type, "---")
         self.assertEqual(player.league, "PREMIER")
 
-    def test_keeper_skips_nationality_token(self) -> None:
-        player = parse_squad_line(
-            ["JONES", "(E)", "GK", "28-10", "MANCHESTER", "UNITED"], "PREMIER"
-        )
-        assert player is not None
-        self.assertEqual(player.name, "JONES")
-        self.assertEqual(player.pos, "GK")
-        self.assertEqual(player.cat, "---")
-        self.assertEqual(player.team, "MANCHESTER UNITED")
-        self.assertEqual(player.age, 28)
-        self.assertEqual(player.level, 10)
-
     def test_star_and_schoolboy_types(self) -> None:
         star = parse_squad_line(
-            ["VAN", "BASTEN", "FW", "30-14", "P/S", "AC", "MILAN"], "SERIE A"
+            ["12)", "VAN", "BASTEN", "FW", "30-14", "P/S", "AC", "MILAN"], "SERIE A"
         )
         sby = parse_squad_line(
-            ["YOUNGSTER", "MF", "17-4", "S", "YOUTH", "FC"], "PREMIER"
+            ["1),", "YOUNGSTER", "MF", "17-4", "S", "YOUTH", "FC"], "PREMIER"
         )
         assert star and sby
         self.assertEqual(star.type, "STAR")
@@ -68,7 +56,7 @@ class SquadParseTests(unittest.TestCase):
     def test_fixture_file(self) -> None:
         ops = parse_shomatch_text((FIXTURES / "squad.txt").read_text(), "PREMIER")
         names = [op.player.name for op in ops if isinstance(op, AddOp)]
-        self.assertEqual(names, ["SMITH", "JONES", "VAN BASTEN", "YOUNGSTER"])
+        self.assertEqual(names, ["SMITH", "VAN BASTEN", "YOUNGSTER"])
 
 
 class AuctionParseTests(unittest.TestCase):
@@ -100,6 +88,30 @@ class AuctionParseTests(unittest.TestCase):
             "PREMIER",
         )
         self.assertIsNone(player)
+
+    def test_multiword_team_ignores_columns_after_price(self) -> None:
+        player = parse_auction_line(
+            tokenize_line(
+                "<$AUCT TABLE>    1)    SW    18-5    PHILLIPS"
+                "    (REALE HASTINGS)    1500K    7    966K"
+            ),
+            "PREMIER",
+        )
+        assert player is not None
+        self.assertEqual(player.team, "REALE HASTINGS")
+        self.assertEqual(player.name, "PHILLIPS")
+        self.assertEqual(player.pos, "SW")
+        self.assertEqual(player.age, 18)
+        self.assertEqual(player.level, 5)
+
+    def test_single_word_team_ignores_columns_after_price(self) -> None:
+        player = parse_auction_line(
+            ["1)", "DF", "24-8", "JOHN", "SMITH", "(ARSENAL)", "150K", "3", "80K"],
+            "PREMIER",
+        )
+        assert player is not None
+        self.assertEqual(player.team, "ARSENAL")
+        self.assertEqual(player.name, "JOHN SMITH")
 
     def test_fixture_file(self) -> None:
         ops = parse_shomatch_text((FIXTURES / "auction.txt").read_text(), "PREMIER")

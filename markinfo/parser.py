@@ -120,7 +120,13 @@ def parse_auction_line(words: list[str], league: str) -> Optional[Player]:
         return None
     if words[3] == "NOT" and words[4] == "SOLD.":
         return None
-    idx = last - 1
+    # Columns after the price (bids, wage) mean the team is not words[-2].
+    # The team is the parenthesized span, e.g. "(REALE HASTINGS)".
+    idx = last
+    while idx > 3 and not words[idx].endswith(")"):
+        idx -= 1
+    if not words[idx].endswith(")"):
+        return None
     team = words[idx][:-1]
     while not team.startswith("("):
         idx -= 1

@@ -16,7 +16,8 @@ from markinfo.config import (
     save_config,
     step_ui_scale,
 )
-from markinfo.database import DBManager
+from markinfo.database import DBManager, connect_sqlite
+from markinfo.migrate import MigrationError, migrate_jet_to_sqlite
 from markinfo.models import (
     AGE_MAX,
     AGE_MIN,
@@ -451,6 +452,11 @@ class MarkInfoApp:
         menubar = tk.Menu(self.root)
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="New Season", command=self._new_season, accelerator="Ctrl+N")
+        file_menu.add_separator()
+        file_menu.add_command(
+            label="Migrate VB6 Database...",
+            command=self._migrate_vb6,
+        )
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self._on_close)
         menubar.add_cascade(label="File", menu=file_menu)
@@ -1051,6 +1057,99 @@ class MarkInfoApp:
             self._run_search()
 
     # -- import / season ----------------------------------------------------
+
+    def _migrate_vb6(self) -> None:
+        guess = Path.cwd() / "vb6"
+        source = filedialog.askopenfilename(
+            title="Choose VB6 Jet database",
+            parent=self.root,
+            initialdir=str(guess if guess.is_dir() else Path.cwd()),
+            filetypes=[
+                ("Access databases", "*.mdb"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not source:
+            return
+        destination = filedialog.asksaveasfilename(
+            title="New SQLite database",
+            parent=self.root,
+            defaultextension=".db",
+            initialfile="markinfo.db",
+            filetypes=[
+                ("SQLite databases", "*.db"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not destination:
+            return
+        dest = Path(destination)
+        if self._same_open_database(dest):
+            messagebox.showerror(
+                "Migrate VB6 Database",
+                "Choose a new SQLite file. The database MarkInfo has open "
+                "cannot be replaced while it is in use.",
+                parent=self.root,
+            )
+            return
+        overwrite = False
+        if dest.exists():
+            overwrite = messagebox.askyesno(
+                "Migrate VB6 Database",
+                f"{dest} already exists. Replace it?",
+                parent=self.root,
+            )
+            if not overwrite:
+                return
+        self.root.config(cursor="watch")
+        self.root.update_idletasks()
+        try:
+            result = migrate_jet_to_sqlite(source, dest, overwrite=overwrite)
+        except MigrationError as exc:
+            messagebox.showerror("Migrate VB6 Database", str(exc), parent=self.root)
+            return
+        finally:
+            self.root.config(cursor="")
+        messagebox.showinfo(
+            "Migrate VB6 Database",
+            f"Wrote {result.path}\n\n"
+            f"{result.leagues} league(s), {result.teams} team(s), "
+            f"{result.players} player(s). Session is {result.session}.",
+            parent=self.root,
+        )
+        if messagebox.askyesno(
+            "Migrate VB6 Database",
+            "Open the new database now?",
+            parent=self.root,
+        ):
+            self._open_sqlite(result.path)
+
+    def _same_open_database(self, path: Path) -> bool:
+        if self.config.database.kind != "sqlite":
+            return False
+        try:
+            return path.resolve() == Path(self.config.database.path).resolve()
+        except OSError:
+            return False
+
+    def _open_sqlite(self, path: Path) -> None:
+        previous = self.db
+        try:
+            opened = connect_sqlite(path)
+        except Exception as exc:
+            messagebox.showerror(
+                "Migrate VB6 Database",
+                f"Could not open {path}:\n{exc}",
+                parent=self.root,
+            )
+            return
+        previous.close()
+        self.db = opened
+        self.config.database.kind = "sqlite"
+        self.config.database.path = str(path)
+        self.session_var.set(self.db.session)
+        self.refresh_leagues()
+        self.status.set(f"Opened {path}")
 
     def _import_shomatch(self) -> None:
         league = self.current_league()

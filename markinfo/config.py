@@ -146,6 +146,17 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         dest="ui_scale",
         help="UI size multiplier (1.0 = 100%%, 1.5 = 150%%, max 2.5)",
     )
+    parser.add_argument(
+        "--migrate-vb6",
+        metavar="MDB",
+        help="Read a VB6 Jet database and write a new SQLite file, then exit",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        metavar="SQLITE",
+        help="SQLite file to create with --migrate-vb6",
+    )
     return parser.parse_args(argv)
 
 

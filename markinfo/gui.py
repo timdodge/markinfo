@@ -67,6 +67,34 @@ NAMED_FONTS = (
     "TkIconFont",
     "TkTooltipFont",
 )
+# Even rows use the tree background. Odd rows use a cool band that stays
+# lighter than the selection color so a row can be followed across columns.
+ROW_BASE = "#ffffff"
+ROW_STRIPE = "#cfe0f2"
+OLD_FG = "#4a5560"
+
+STRIPE_TAG = "stripe"
+
+
+def restripe_tree(tree: ttk.Treeview) -> None:
+    """Band every other visible row.
+
+    Tk sets an ``alternate`` state on odd rows only after the row color
+    has already been chosen, so a style map for that state never paints.
+    A background tag does paint, and the theme's selected color replaces
+    it on the current row. The tag stays on the item, so it is reassigned
+    from the visual order, including after a column sort.
+    """
+    for index, item in enumerate(tree.get_children("")):
+        raw = tree.item(item, "tags")
+        if isinstance(raw, str):
+            tags = raw.split()
+        else:
+            tags = [str(tag) for tag in raw]
+        tags = [tag for tag in tags if tag != STRIPE_TAG]
+        if index % 2 == 1:
+            tags.append(STRIPE_TAG)
+        tree.item(item, tags=tuple(tags))
 
 
 def set_window_icon(win: tk.Misc) -> None:
@@ -616,7 +644,9 @@ class MarkInfoApp:
                 width=int(TREE_COL_WIDTHS.get(col, 80) * factor),
                 anchor="center" if col != "name" else "w",
             )
-        tree.tag_configure("old", foreground="#666666")
+        tree.tag_configure(STRIPE_TAG, background=ROW_STRIPE)
+        # Previous-season names stay muted, and readable on both row bands.
+        tree.tag_configure("old", foreground=OLD_FG)
         self._tree_sort[id(tree)] = {
             "col": None,
             "reverse": False,
@@ -636,23 +666,23 @@ class MarkInfoApp:
 
     def _apply_sort(self, tree: ttk.Treeview) -> None:
         state = self._tree_sort.get(id(tree))
-        if not state or not state["col"]:
-            return
-        col = state["col"]
-        reverse = state["reverse"]
-        rows = [(tree.set(item, col), item) for item in tree.get_children("")]
-        numeric = all(not value or _is_int(value) for value, _item in rows)
-        if numeric:
-            rows.sort(key=lambda pair: int(pair[0] or 0), reverse=reverse)
-        else:
-            rows.sort(key=lambda pair: str(pair[0]), reverse=reverse)
-        for index, (_value, item) in enumerate(rows):
-            tree.move(item, "", index)
-        for name, heading in state["headings"].items():
-            suffix = ""
-            if name == col:
-                suffix = " ↓" if reverse else " ↑"
-            tree.heading(name, text=heading + suffix)
+        if state and state["col"]:
+            col = state["col"]
+            reverse = state["reverse"]
+            rows = [(tree.set(item, col), item) for item in tree.get_children("")]
+            numeric = all(not value or _is_int(value) for value, _item in rows)
+            if numeric:
+                rows.sort(key=lambda pair: int(pair[0] or 0), reverse=reverse)
+            else:
+                rows.sort(key=lambda pair: str(pair[0]), reverse=reverse)
+            for index, (_value, item) in enumerate(rows):
+                tree.move(item, "", index)
+            for name, heading in state["headings"].items():
+                suffix = ""
+                if name == col:
+                    suffix = " ↓" if reverse else " ↑"
+                tree.heading(name, text=heading + suffix)
+        restripe_tree(tree)
 
     # -- UI scale -----------------------------------------------------------
 
